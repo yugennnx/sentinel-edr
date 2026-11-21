@@ -1,8 +1,14 @@
+import os
+import sys
+
+# Betik dogrudan calistirildiginda (streamlit run / python) proje kokunu import yoluna ekle
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 import tkinter as tk
 import sqlite3
 import datetime
 
-from config import DB_PATH as DB_NAME
+from sentinel.config import DB_PATH as DB_NAME
 
 def fetch_data():
     try:

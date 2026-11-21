@@ -1,6 +1,11 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import sqlite3
 
-from config import DB_PATH
+from sentinel.config import DB_PATH
 
 # Veritabanına salt okunur bağlan (çalışan sisteme dokunmaz)
 try:

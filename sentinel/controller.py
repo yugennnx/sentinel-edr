@@ -4,10 +4,14 @@ import signal
 import sys
 import time
 
-from config import get_logger
-from database import db_writer_worker
-from sensors import physical_layer_worker, cyber_layer_worker, network_layer_worker, local_behavior_worker
-from ai_engine import ai_fusion_worker
+from sentinel.config import get_logger
+from sentinel.database import db_writer_worker
+from sentinel.engine.fusion import ai_fusion_worker
+from sentinel.sensors.exfil import exfil_worker
+from sentinel.sensors.local import local_behavior_worker
+from sentinel.sensors.network import network_layer_worker, scan_detector_worker
+from sentinel.sensors.physical import physical_layer_worker
+from sentinel.sensors.process import cyber_layer_worker
 
 log = get_logger("controller")
 
@@ -53,6 +57,8 @@ def main():
         _proc(physical_layer_worker, sensor_queue, name="sensor-physical"),
         _proc(cyber_layer_worker, sensor_queue, name="sensor-cyber"),
         _proc(network_layer_worker, sensor_queue, name="sensor-network"),
+        _proc(scan_detector_worker, sensor_queue, name="sensor-scan"),
+        _proc(exfil_worker, sensor_queue, name="sensor-exfil"),
         _proc(local_behavior_worker, sensor_queue, name="sensor-local"),
     ]
     db_process = _proc(db_writer_worker, db_queue, name="db-writer")
@@ -63,7 +69,7 @@ def main():
     for p in [router_process, db_process, ai_process, *sensors]:
         p.start()
 
-    log.info("Tum cekirdek moduller devrede (Fiziksel, Siber, Ag, Lokal, AI, Router).")
+    log.info("Tum cekirdek moduller devrede (Fiziksel, Siber, Ag, Tarama, Sizdirma, Lokal, AI, Router).")
     log.info("Cikis yapmak icin konsolda Ctrl+C'ye basin.")
 
     try:

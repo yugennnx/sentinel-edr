@@ -21,3 +21,6 @@ venv/
 
 # Buyuk / gecici dosyalar
 *.bak
+
+# Test
+.pytest_cache/

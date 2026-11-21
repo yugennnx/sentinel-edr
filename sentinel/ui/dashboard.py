@@ -1,10 +1,17 @@
+import os
+import sys
+
+# Betik dogrudan calistirildiginda (streamlit run / python) proje kokunu import yoluna ekle
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 import streamlit as st
 import pandas as pd
 import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
 
-from config import DB_PATH
+from sentinel.config import DB_PATH
+from sentinel.events import CRITICAL_EVENTS
 
 # ==========================================
 # 1. SABİT İSKELET VE CSS (ASLA YENİLENMEZ)
@@ -31,7 +38,7 @@ st.markdown("<h1 style='text-align: center; color: #4AF626; text-shadow: 0 0 15p
 DB_NAME = DB_PATH
 
 # Kirmizi alarm uretecek olay tipleri (tum yuksek riskli olaylar)
-KRITIK_OLAYLAR = ["USB_INSERTED", "DATA_EXFILTRATION", "KEYBOARD_ANOMALY", "LOCAL_FILE_ACCESS", "NETWORK_SCAN"]
+KRITIK_OLAYLAR = CRITICAL_EVENTS
 
 def fetch_data():
     try:

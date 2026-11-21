@@ -6,8 +6,9 @@ import os
 
 import psutil
 
-BASE_DIR = os.path.normcase(os.path.dirname(os.path.abspath(__file__)))
-BETIKLER = {"controller.py", "baslat.py", "arayuz.py", "dashboard.py", "nemesis.py"}
+BASE_DIR = os.path.normcase(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BETIKLER = {"run.py", "desktop.py", "dashboard.py", "nemesis.py"}
+MODULLER = {"sentinel.controller"}
 
 
 def sentinel_sureci_mi(proc):
@@ -18,9 +19,12 @@ def sentinel_sureci_mi(proc):
         cwd = os.path.normcase(proc.cwd())
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return False
+    # "python -m sentinel.controller" bu klasorden baslatildiysa
+    if cwd == BASE_DIR and any(arg in MODULLER for arg in cmdline):
+        return True
     for arg in cmdline[1:]:
         tam_yol = os.path.normcase(os.path.abspath(os.path.join(cwd, arg)))
-        if os.path.basename(tam_yol) in BETIKLER and os.path.dirname(tam_yol) == BASE_DIR:
+        if os.path.basename(tam_yol) in BETIKLER and tam_yol.startswith(BASE_DIR + os.sep):
             return True
     return False
 

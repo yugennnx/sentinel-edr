@@ -1,0 +1,9 @@
+[project]
+name = "sentinel-edr"
+version = "0.2.0"
+description = "Windows icin siber-fiziksel EDR/IPS prototipi"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

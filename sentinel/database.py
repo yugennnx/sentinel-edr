@@ -1,14 +1,16 @@
+import os
 import queue as queue_mod
 import sqlite3
 from datetime import datetime
 
-from config import DB_PATH, get_logger
+from sentinel.config import DB_PATH, get_logger
 
 DB_NAME = DB_PATH  # Geriye donuk uyumluluk
 log = get_logger("database")
 
 
 def init_db(db_path=DB_PATH):
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     conn = sqlite3.connect(db_path)
     try:
         cursor = conn.cursor()
