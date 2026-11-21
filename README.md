@@ -23,7 +23,7 @@ Sentinel, Windows için geliştirilmiş, **fiziksel katman** (USB, klavye) ile *
 
 1. **Ağ savunması:** Tarama yapan IP, Windows Güvenlik Duvarı'nda engellenir (`netsh`, yönetici gerekir).
 2. **Donanım:** BadUSB tespitinde oturum anında kilitlenir.
-3. **Gölge müdahale:** Şüpheli süreç + veri sızdırma birlikte görülürse, oturum kilitlenmeden sadece ilgili süreçler sessizce öldürülür.
+3. **Gölge müdahale:** Şüpheli süreç + veri sızdırma birlikte görülürse ya da bir Office uygulaması kabuk açarsa, oturum kilitlenmeden sadece ilgili süreçler sessizce öldürülür.
 4. **Kill-chain:** Risk skoru ≥ 80 ise ilgili süreçler öldürülür ve oturum kilitlenir.
 
 Güvenlik önlemleri: süreçler yalnızca **PID + başlangıç zamanı** eşleşirse öldürülür (PID yeniden kullanımına karşı), kritik Windows süreçleri korunur, IP adresleri `ipaddress` ile doğrulanır ve komutlar kabuk kullanılmadan çalıştırılır (komut enjeksiyonu yok), loopback adresleri asla engellenmez.
@@ -85,24 +85,33 @@ IP engelleme ve SYN tarama tespiti için terminali **yönetici olarak** açın.
 python run.py                  # Motor + masaüstü arayüzü
 python run.py --ui dashboard   # Motor + web paneli (Streamlit)
 python run.py --ui none        # Sadece motor
+python run.py --dry-run        # Tespit et, karar ver ama müdahale etme (prova / test)
 ```
+
+`--dry-run` modunda süreç öldürme, IP engelleme ve oturum kilitleme yapılmaz, sadece `[DRY-RUN]` olarak loglanır. Sunumdan önce senaryoları güvenle denemek için kullanın.
 
 Temiz bir başlangıç için (eski logları siler, yönetici izni ister): `temiz_baslat.bat`
 
 ## Demo: Nemesis saldırı simülatörü
 
 ```powershell
-python simulator\nemesis.py
+python simulator\nemesis.py                  # Grafik arayüz
+python simulator\nemesis.py --senaryo EXFIL  # Tek senaryo, arayüzsüz
 ```
 
-| Senaryo | Beklenen tepki |
-|---|---|
-| Ağ taraması (honeypot) | Tarama tespiti, IP engelleme denemesi |
-| Truva atı (gizli PowerShell) | Şüpheli süreç kaydı |
-| Oltalama (Word makrosu) | Maskeleme + Office→kabuk tespiti |
-| Dosyasız indirme (LoTL) | Şüpheli parametre tespiti |
-| Lokal ihlal / veri paketleme | Maskeleme + korunan dizin → süreç imhası + oturum kilidi |
-| Gizli veri sızdırma | Şüpheli süreç + T1560 → gölge müdahale (sessiz imha) |
+Aşağıdaki tepkiler, motor canlı çalışırken her senaryo tek tek tetiklenerek doğrulanmıştır:
+
+| Senaryo | Tespit | Karar |
+|---|---|---|
+| `NMAP` Ağ taraması | Honeypot teması | IP engelleme (loopback hariç) |
+| `TRUVA` Truva atı | `-ExecutionPolicy Bypass` + gizli PowerShell | Kayıt (tek başına zayıf sinyal) |
+| `MAKRO` Oltalama | Maskelenmiş `winword.exe` + Office→PowerShell zinciri | Gölge müdahale: iki süreç sessizce öldürülür |
+| `FILELESS` Dosyasız indirme | Gizli `Invoke-WebRequest` | Kayıt (tek başına zayıf sinyal) |
+| `LOCAL` Lokal ihlal | Maskelenmiş `cmd.exe` korunan dizini hedefliyor | Kill-chain: süreç imhası + oturum kilidi |
+| `DRIPPING` Veri paketleme | Maskelenmiş `cmd.exe` korunan dizini hedefliyor | Kill-chain: süreç imhası + oturum kilidi |
+| `EXFIL` Gizli veri sızdırma | Gizli PowerShell + korunan dizinin arşivlenmesi (T1560) | Gölge müdahale: süreç sessizce öldürülür |
+
+"Kayıt" alan senaryolar panelde görünür. Aynı 10 saniyelik pencerede başka bir sinyalle (veri sızdırma, tarama, USB) birleşirlerse müdahaleye dönüşürler.
 
 > ⚠️ **Etik kullanım:** Simülatörü yalnızca kendi bilgisayarınızda veya izinli bir laboratuvar ortamında kullanın. Senaryolar zararsızdır: sistem araçlarının kopyaları kısa süre bekleyip kapanır, dış bağlantı denemeleri belgeleme amaçlı bir adrese (`192.0.2.10`) yapılır. Kendi laboratuvarınızdaki C2 makinesi için `NEMESIS_C2_IP` ortam değişkenini kullanın.
 
