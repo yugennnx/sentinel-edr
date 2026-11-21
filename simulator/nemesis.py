@@ -3,14 +3,19 @@
 YALNIZCA kendi bilgisayarinizda, Sentinel'in tespitlerini gostermek icin kullanin.
 Senaryolar zararsizdir: sistem araclarinin kopyalari kisa sure bekleyip kapanir,
 dis baglanti denemeleri belgeleme amacli (TEST-NET) bir adrese yapilir.
+
+Kullanim:
+    python simulator/nemesis.py                 # Grafik arayuz
+    python simulator/nemesis.py --senaryo LOCAL # Tek senaryoyu arayuzsuz calistir
+    python simulator/nemesis.py --liste         # Senaryolari listele
 """
-import tkinter as tk
-import subprocess
-import threading
-import socket
-import shutil
+import argparse
 import os
+import shutil
+import socket
+import subprocess
 import tempfile
+import threading
 
 # ==========================================
 # KONFİGÜRASYON
@@ -23,110 +28,136 @@ SIM_DIR = os.path.dirname(os.path.abspath(__file__))
 HEDEF_PROJE = os.path.dirname(SIM_DIR)  # Sentinel'in korudugu proje klasoru
 TEST_CIKTISI = os.path.join(tempfile.gettempdir(), "sentinel_lotl_test.txt")
 SIZINTI_ZIP = os.path.join(tempfile.gettempdir(), "sentinel_exfil_test.zip")
+SYSTEM32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
 
-# Sahnede görsel şov yapmak ve arka plan çökmelerini önlemek için araç yolları
+# Maskeleme senaryolari icin cmd.exe kopyalari
 CASUS_EXE = os.path.join(SIM_DIR, "siber_casus.exe")
 HIRSIZ_EXE = os.path.join(SIM_DIR, "veri_hirsizi.exe")
+WORD_EXE = os.path.join(SIM_DIR, "winword.exe")
+
+CREATE_NEW_CONSOLE = 0x00000010
+
+SENARYOLAR = {
+    "NMAP": ("1. AĞ TARAMASI (Honeypot Teması)", "#00FFFF"),
+    "TRUVA": ("2. TRUVA ATI (C2 Sızması)", "#00FF00"),
+    "MAKRO": ("3. OLTALAMA (Zararlı Word Makrosu)", "#FF00FF"),
+    "FILELESS": ("4. DOSYASIZ İNDİRME (Living off the Land)", "#00BFFF"),
+    "LOCAL": ("5. LOKAL İHLAL (Casus Sızması)", "#FF8C00"),
+    "DRIPPING": ("6. VERİ PAKETLEME (Zipleme Sızıntısı)", "#FFD700"),
+    "EXFIL": ("7. GİZLİ VERİ SIZDIRMA (Compress-Archive)", "#FF4500"),
+}
+
 
 def araclari_hazirla():
-    cmd_path = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe")
-    try:
-        # CMD'nin kopyasi sahte ajan olarak yaratilir (Asla cokmez)
-        if not os.path.exists(CASUS_EXE): shutil.copy2(cmd_path, CASUS_EXE)
-        if not os.path.exists(HIRSIZ_EXE): shutil.copy2(cmd_path, HIRSIZ_EXE)
-    except Exception as e:
-        print("Arac hazirlama hatasi:", e)
+    cmd_path = os.path.join(SYSTEM32, "cmd.exe")
+    for hedef in (CASUS_EXE, HIRSIZ_EXE, WORD_EXE):
+        if not os.path.exists(hedef):
+            shutil.copy2(cmd_path, hedef)
 
-def ag_taramasi_yap():
-    # Sentinel'in tuzak kapısına (Bal Küpü - Port 9999) direkt saldırı
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+def _honeypot_temasi():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         s.connect_ex((HEDEF_IP, 9999))
-        s.close()
-    except: pass
 
-def execute_attack(attack_type):
+
+def _konsol(exe, baslik, renk, satirlar, sure=15):
+    """Gorsel bir 'korsan terminali' acar (maskelenmis cmd kopyasi)."""
+    echo = " & ".join(f"echo {s}" for s in satirlar)
+    cmd = f'"{exe}" /c "color {renk} & title {baslik} & {echo} & ping 127.0.0.1 -n {sure} > nul"'
+    return subprocess.Popen(cmd, creationflags=CREATE_NEW_CONSOLE)
+
+
+def senaryo_baslat(ad, arka_planda=True):
+    """Senaryoyu baslatir ve olusturulan sureci (varsa) dondurur."""
     araclari_hazirla()
-    
-    # Sahnede yeni bir terminal penceresi açma bayrağı (Arka plan çökmelerini engeller)
-    CREATE_NEW_CONSOLE = 0x00000010 
 
-    if attack_type == "NMAP":
-        status_label.config(text="[+] DURUM: Ag Kesfi (Nmap SYN Scan) Baslatildi...", fg="#00FFFF")
-        threading.Thread(target=ag_taramasi_yap).start()
+    if ad == "NMAP":
+        if arka_planda:  # Arayuz donmasin
+            threading.Thread(target=_honeypot_temasi, daemon=True).start()
+        else:
+            _honeypot_temasi()
+        return None
 
-    elif attack_type == "TRUVA":
-        status_label.config(text="[+] DURUM: Truva Ati (C2) Baglaniyor...", fg="#00FF00")
-        cmd = f'powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$client = New-Object System.Net.Sockets.TcpClient(\'{KALI_IP}\', 9999); Start-Sleep -s 10; $client.Close()"'
-        subprocess.Popen(cmd, shell=True)
+    if ad == "TRUVA":
+        ps = (f"$c = New-Object System.Net.Sockets.TcpClient; "
+              f"try {{ $c.ConnectAsync('{KALI_IP}', 4444) | Out-Null }} catch {{}}; Start-Sleep -s 12; $c.Close()")
+        return subprocess.Popen(["powershell.exe", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
+                                 "-Command", ps])
 
-    elif attack_type == "MAKRO":
-        status_label.config(text="[+] DURUM: Oltalama (Makro) Devrede...", fg="#FF00FF")
-        cmd = 'copy "%SystemRoot%\\System32\\cmd.exe" winword.exe /Y > nul && winword.exe /c "powershell.exe -WindowStyle Hidden -Command Start-Sleep -s 10"'
-        subprocess.Popen(cmd, shell=True, cwd=SIM_DIR)
+    if ad == "MAKRO":
+        # Maskelenmis "winword.exe" (cmd kopyasi) gizli PowerShell baslatir
+        return subprocess.Popen(f'"{WORD_EXE}" /c "powershell.exe -WindowStyle Hidden -Command Start-Sleep -s 12"',
+                                cwd=SIM_DIR)
 
-    elif attack_type == "FILELESS":
-        status_label.config(text="[+] DURUM: Dosyasiz Indirme (LoTL) Calistirildi...", fg="#00BFFF")
-        cmd = f'powershell.exe -WindowStyle Hidden -Command "Invoke-WebRequest -Uri http://example.com -OutFile \'{TEST_CIKTISI}\'; Start-Sleep -s 10"'
-        subprocess.Popen(cmd, shell=True)
+    if ad == "FILELESS":
+        ps = f"Invoke-WebRequest -Uri http://example.com -OutFile '{TEST_CIKTISI}'; Start-Sleep -s 12"
+        return subprocess.Popen(["powershell.exe", "-WindowStyle", "Hidden", "-Command", ps])
 
-    elif attack_type == "LOCAL":
-        status_label.config(text="[+] DURUM: Lokal Ihlal (Gorsel Casus) Devrede...", fg="#FF8C00")
-        # Ekranda KIRMIZI renkli gercek bir korsan terminali firlatir. AI onu 15 saniye icinde gorecek.
-        cmd = f'"{CASUS_EXE}" /c "color 4c & title SIBER CASUS - SIZMA BASARILI & echo [!] SISTEME SIZILDI. & echo [^>] Hedeflenen Dizin: {HEDEF_PROJE} & echo [*] Kritik Sifreler Cekiliyor... Lutfen Bekleyin. & ping 127.0.0.1 -n 15 > nul"'
-        subprocess.Popen(cmd, creationflags=CREATE_NEW_CONSOLE)
+    if ad == "LOCAL":
+        return _konsol(CASUS_EXE, "SIBER CASUS - SIZMA BASARILI", "4c",
+                       ["[!] SISTEME SIZILDI.", f"[^>] Hedeflenen Dizin: {HEDEF_PROJE}",
+                        "[*] Kritik Sifreler Cekiliyor... Lutfen Bekleyin."])
 
-    elif attack_type == "DRIPPING":
-        status_label.config(text="[+] DURUM: Veri Paketleme (Gorsel Hirsiz) Devrede...", fg="#FFD700")
-        # Ekranda SARI renkli gercek bir korsan terminali firlatir.
-        cmd = f'"{HIRSIZ_EXE}" /c "color 60 & title VERI HIRSIZI - PAKETLEME & echo [!] VERI SIZINTISI BASLADI. & echo [^>] Kaynak Merkez: {HEDEF_PROJE} & echo [*] Tum projeler arsivleniyor (Dripping)... & ping 127.0.0.1 -n 15 > nul"'
-        subprocess.Popen(cmd, creationflags=CREATE_NEW_CONSOLE)
+    if ad == "DRIPPING":
+        return _konsol(HIRSIZ_EXE, "VERI HIRSIZI - PAKETLEME", "60",
+                       ["[!] VERI SIZINTISI BASLADI.", f"[^>] Kaynak Merkez: {HEDEF_PROJE}",
+                        "[*] Tum projeler arsivleniyor (Dripping)..."])
 
-    elif attack_type == "EXFIL":
-        status_label.config(text="[+] DURUM: Gizli Veri Paketleme (Compress-Archive) Devrede...", fg="#FF4500")
+    if ad == "EXFIL":
         # Gizli PowerShell (SUSPICIOUS_PROCESS) + korunan dizinin arsivlenmesi (DATA_EXFILTRATION)
-        # -> Sentinel'in 'golge mudahale' protokolu sureci sessizce oldurmeli. Zip sonunda silinir.
+        # -> 'golge mudahale': surec sessizce oldurulmeli. Zip sonunda silinir.
         kaynak = os.path.join(HEDEF_PROJE, "sentinel")
-        cmd = (f"powershell.exe -WindowStyle Hidden -Command \"Compress-Archive -Path '{kaynak}' "
-               f"-DestinationPath '{SIZINTI_ZIP}' -Force; Start-Sleep -s 15; Remove-Item '{SIZINTI_ZIP}'\"")
-        subprocess.Popen(cmd, shell=True)
+        ps = (f"Compress-Archive -Path '{kaynak}' -DestinationPath '{SIZINTI_ZIP}' -Force; "
+              f"Start-Sleep -s 12; Remove-Item '{SIZINTI_ZIP}' -ErrorAction SilentlyContinue")
+        return subprocess.Popen(["powershell.exe", "-WindowStyle", "Hidden", "-Command", ps])
 
-    root.after(4000, lambda: status_label.config(text="[*] DURUM: Hedef Bekleniyor...", fg="#FF003C"))
+    raise ValueError(f"Bilinmeyen senaryo: {ad}")
 
-# ==========================================
-# ARAYÜZ TASARIMI
-# ==========================================
-root = tk.Tk()
-root.title("NEMESIS | Saldiri Arayuzu")
-root.geometry("600x600")
-root.configure(bg="#050505")
 
-header = tk.Label(root, text="☠️ NEMESIS SALDIRI AĞI ☠️", font=("Courier", 18, "bold"), bg="#050505", fg="#FF003C")
-header.pack(pady=15)
+def arayuz():
+    import tkinter as tk
 
-btn_nmap = tk.Button(root, text="1. AĞ TARAMASI (Nmap / Kesif)", font=("Consolas", 11, "bold"), bg="#1a0000", fg="#00FFFF", activebackground="#00FFFF", width=50, command=lambda: execute_attack("NMAP"))
-btn_nmap.pack(pady=6)
+    root = tk.Tk()
+    root.title("NEMESIS | Saldiri Arayuzu")
+    root.geometry("600x600")
+    root.configure(bg="#050505")
 
-btn_truva = tk.Button(root, text="2. TRUVA ATI (C2 Sizmasi)", font=("Consolas", 11, "bold"), bg="#1a0000", fg="#00FF00", activebackground="#00FF00", width=50, command=lambda: execute_attack("TRUVA"))
-btn_truva.pack(pady=6)
+    tk.Label(root, text="☠️ NEMESIS SALDIRI AĞI ☠️", font=("Courier", 18, "bold"),
+             bg="#050505", fg="#FF003C").pack(pady=15)
+    durum = tk.Label(root, text="[*] DURUM: Hedef Bekleniyor...", font=("Courier", 11), bg="#050505", fg="#FF003C")
 
-btn_makro = tk.Button(root, text="3. OLTALAMA (Zararli Word Makrosu)", font=("Consolas", 11, "bold"), bg="#1a0000", fg="#FF00FF", activebackground="#FF00FF", width=50, command=lambda: execute_attack("MAKRO"))
-btn_makro.pack(pady=6)
+    def calistir(ad, baslik, renk):
+        try:
+            senaryo_baslat(ad)
+            durum.config(text=f"[+] DURUM: {baslik} devrede...", fg=renk)
+        except Exception as e:
+            durum.config(text=f"[!] HATA: {e}", fg="#FF003C")
+        root.after(4000, lambda: durum.config(text="[*] DURUM: Hedef Bekleniyor...", fg="#FF003C"))
 
-btn_fileless = tk.Button(root, text="4. DOSYASIZ İNDİRME (Living off the Land)", font=("Consolas", 11, "bold"), bg="#1a0000", fg="#00BFFF", activebackground="#00BFFF", width=50, command=lambda: execute_attack("FILELESS"))
-btn_fileless.pack(pady=6)
+    for ad, (baslik, renk) in SENARYOLAR.items():
+        tk.Button(root, text=baslik, font=("Consolas", 11, "bold"), bg="#1a0000", fg=renk,
+                  activebackground=renk, width=50,
+                  command=lambda a=ad, b=baslik, r=renk: calistir(a, b, r)).pack(pady=6)
+    durum.pack(pady=20)
+    root.mainloop()
 
-btn_local = tk.Button(root, text="5. LOKAL İHLAL (Casus Sızması)", font=("Consolas", 11, "bold"), bg="#1a0000", fg="#FF8C00", activebackground="#FF8C00", width=50, command=lambda: execute_attack("LOCAL"))
-btn_local.pack(pady=6)
 
-btn_drip = tk.Button(root, text="6. VERİ PAKETLEME (Zipleme Sızıntısı)", font=("Consolas", 11, "bold"), bg="#1a0000", fg="#FFD700", activebackground="#FFD700", width=50, command=lambda: execute_attack("DRIPPING"))
-btn_drip.pack(pady=6)
+def main():
+    parser = argparse.ArgumentParser(description="NEMESIS saldiri simulatoru (yalnizca kendi makinenizde)")
+    parser.add_argument("--senaryo", choices=list(SENARYOLAR), help="Arayuz acmadan tek senaryo calistir")
+    parser.add_argument("--liste", action="store_true", help="Senaryolari listele")
+    args = parser.parse_args()
 
-btn_exfil = tk.Button(root, text="7. GİZLİ VERİ SIZDIRMA (Compress-Archive)", font=("Consolas", 11, "bold"), bg="#1a0000", fg="#FF4500", activebackground="#FF4500", width=50, command=lambda: execute_attack("EXFIL"))
-btn_exfil.pack(pady=6)
+    if args.liste:
+        for ad, (baslik, _) in SENARYOLAR.items():
+            print(f"{ad:<9} {baslik}")
+    elif args.senaryo:
+        p = senaryo_baslat(args.senaryo, arka_planda=False)
+        print(f"[+] {args.senaryo} baslatildi" + (f" (PID {p.pid})" if p else ""))
+    else:
+        arayuz()
 
-status_label = tk.Label(root, text="[*] DURUM: Hedef Bekleniyor...", font=("Courier", 11), bg="#050505", fg="#FF003C")
-status_label.pack(pady=20)
 
-root.mainloop()
+if __name__ == "__main__":
+    main()

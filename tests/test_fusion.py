@@ -71,3 +71,18 @@ def test_gecersiz_olay_reddedilir():
     m = FusionEngine()
     assert m.ingest("bozuk", 0) is False
     assert m.evaluate(0) == []
+
+
+def test_office_makro_zinciri_golge_mudahale():
+    m = FusionEngine()
+    m.ingest(olay(ev.SUSPICIOUS_PROCESS,
+                  "EDR: powershell.exe (PID: 5, CTIME: 1.0) | Neden: Zararli Parent-Child Baglantisi (winword.exe -> powershell.exe)"), 0)
+    a = m.evaluate(0)
+    assert turler(a) == ["kill"]
+
+
+def test_ayni_surece_tek_kill():
+    m = FusionEngine()
+    m.ingest(olay(ev.SUSPICIOUS_PROCESS, "EDR: powershell.exe (PID: 7, CTIME: 2.0)"), 0)
+    m.ingest(olay(ev.DATA_EXFILTRATION, "Veri Paketleme (PID: 7, CTIME: 2.0)"), 0)
+    assert turler(m.evaluate(0)).count("kill") == 1

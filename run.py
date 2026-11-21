@@ -45,7 +45,12 @@ def main():
     parser = argparse.ArgumentParser(description="SENTINEL siber-fiziksel EDR/IPS")
     parser.add_argument("--ui", choices=["desktop", "dashboard", "none"], default="desktop",
                         help="Motorla birlikte acilacak arayuz (varsayilan: desktop)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Tespit et ve karar ver ama mudahale etme (surec oldurme/IP engelleme/kilit yok)")
     args = parser.parse_args()
+    if args.dry_run:
+        os.environ["SENTINEL_DRY_RUN"] = "1"
+        print("[!] DRY-RUN modu: mudahaleler sadece loglanacak.")
 
     print("[*] SENTINEL baslatiliyor...")
     motor = subprocess.Popen([sys.executable, "-m", "sentinel.controller"], cwd=BASE_DIR)

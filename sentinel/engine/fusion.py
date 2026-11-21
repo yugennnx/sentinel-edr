@@ -8,7 +8,8 @@ birim testleriyle dogrulanabilir.
 Protokoller (oncelik sirasiyla):
   1. Ag savunmasi   : NETWORK_SCAN -> saldirgan IP guvenlik duvarinda engellenir
   2. Donanim        : KEYBOARD_ANOMALY (BadUSB) -> oturum hemen kilitlenir
-  3. Golge mudahale : SUSPICIOUS_PROCESS + DATA_EXFILTRATION (USB/lokal ihlal yok)
+  3. Golge mudahale : SUSPICIOUS_PROCESS + DATA_EXFILTRATION, ya da Office
+                      uygulamasindan kabuk acilmasi (USB/lokal ihlal yok)
                       -> sadece supheli surecler sessizce oldurulur
   4. Kill-chain     : risk >= esik -> surecler oldurulur + oturum kilitlenir
 """
@@ -22,6 +23,7 @@ from sentinel import events as ev
 from sentinel.config import EVENT_WINDOW_SECONDS, KILL_CHAIN_THRESHOLD, LOCK_COOLDOWN_SECONDS, get_logger
 from sentinel.engine import response
 from sentinel.engine.risk import risk_skoru
+from sentinel.sensors.process import OFFICE_ZINCIRI
 
 log = get_logger("engine.fusion")
 
@@ -41,7 +43,9 @@ def _pid_aksiyonlari(olaylar, tipler):
         if olay["tip"] in tipler:
             m = PID_REGEX.search(olay["mesaj"])
             if m:
-                aksiyonlar.append(Action("kill", (int(m.group(1)), float(m.group(2)))))
+                aksiyon = Action("kill", (int(m.group(1)), float(m.group(2))))
+                if aksiyon not in aksiyonlar:  # Ayni surec birden fazla kuralla yakalanmis olabilir
+                    aksiyonlar.append(aksiyon)
     return aksiyonlar
 
 
@@ -101,9 +105,11 @@ class FusionEngine:
             return aksiyonlar
 
         # PROTOKOL 3: Golge mudahale (sessiz savunma)
+        office_zinciri = any(o["tip"] == ev.SUSPICIOUS_PROCESS and OFFICE_ZINCIRI in o["mesaj"] for o in self.gecmis)
         if (ev.USB_INSERTED not in tipler and ev.LOCAL_FILE_ACCESS not in tipler
-                and ev.SUSPICIOUS_PROCESS in tipler and ev.DATA_EXFILTRATION in tipler):
-            aksiyonlar.append(Action("alert", ("WARNING", f"UZAKTAN SALDIRI (Truva ati suphesi) - risk {risk}")))
+                and ev.SUSPICIOUS_PROCESS in tipler and (ev.DATA_EXFILTRATION in tipler or office_zinciri)):
+            neden = "Office makro zinciri" if office_zinciri else "Truva ati suphesi"
+            aksiyonlar.append(Action("alert", ("WARNING", f"GOLGE MUDAHALE ({neden}) - risk {risk}")))
             aksiyonlar += _pid_aksiyonlari(self.gecmis, {ev.SUSPICIOUS_PROCESS, ev.DATA_EXFILTRATION})
             self._sifirla(now, kilit=False)
             return aksiyonlar

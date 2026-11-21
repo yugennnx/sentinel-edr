@@ -10,6 +10,10 @@ DB_PATH = os.path.join(DATA_DIR, "sentinel_logs.db")
 # Korunan dizin: bu klasoru hedef alan arsivleme/erisim davranislari izlenir
 PROTECTED_DIR = BASE_DIR
 
+# Kuru calistirma: tespitler ve kararlar loglanir ama surec oldurme, IP engelleme
+# ve oturum kilitleme UYGULANMAZ. Test ve sunum provasi icin: SENTINEL_DRY_RUN=1
+DRY_RUN = os.environ.get("SENTINEL_DRY_RUN") == "1"
+
 # --- Ag: honeypot -----------------------------------------------------------
 HONEYPOT_HOST = "0.0.0.0"
 HONEYPOT_PORT = 9999

@@ -5,6 +5,7 @@ import subprocess
 
 import psutil
 
+from sentinel import config
 from sentinel.config import get_logger
 
 log = get_logger("engine.response")
@@ -24,6 +25,9 @@ def guvenli_surec_oldur(hedef_pid, hedef_ctime):
         if p.name().lower() in KORUNAN_SURECLER:
             log.warning("Korunan sistem sureci (%s) oldurulmedi.", p.name())
             return False
+        if config.DRY_RUN:
+            log.warning("[DRY-RUN] Surec oldurulecekti: %s (PID %s)", p.name(), hedef_pid)
+            return True
         p.kill()
         log.warning("Zararli surec imha edildi: %s (PID %s)", p.name(), hedef_pid)
         return True
@@ -62,6 +66,10 @@ def dinamik_ip_engelle(saldirgan_ip):
         return False
     if saldirgan_ip in _engellenen_ipler:
         return True  # Ayni IP icin tekrar tekrar kural olusturma
+    if config.DRY_RUN:
+        log.warning("[DRY-RUN] IP engellenecekti: %s", saldirgan_ip)
+        _engellenen_ipler.add(saldirgan_ip)
+        return True
     if not yonetici_mi():
         log.error("IPS: %s engellenemedi - Sentinel yonetici olarak calismiyor.", saldirgan_ip)
         return False
@@ -84,6 +92,9 @@ def dinamik_ip_engelle(saldirgan_ip):
 
 
 def oturumu_kilitle():
+    if config.DRY_RUN:
+        log.warning("[DRY-RUN] Oturum kilitlenecekti.")
+        return
     try:
         ctypes.windll.user32.LockWorkStation()
         log.warning("Oturum kilitlendi.")

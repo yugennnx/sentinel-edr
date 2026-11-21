@@ -22,6 +22,7 @@ HEDEF_KABUKLAR = {'cmd.exe', 'powershell.exe', 'pwsh.exe', 'wscript.exe', 'cscri
 ZARARLI_PARAMETRELER = ['-enc', 'bypass', 'hidden', 'downloadstring', 'invoke-webrequest',
                         'bitsadmin', 'certutil', 'iex', 'frombase64string']
 GUVENLI_PORTLAR = {80, 443}
+OFFICE_ZINCIRI = "Zararli Parent-Child Baglantisi"  # Karar motoru bu isareti arar
 
 # Maskelemede izlenen sistem araclari (PE dosyasindaki OriginalFilename -> gercek ad)
 LOLBINS = {"cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe", "mshta.exe",
@@ -51,7 +52,7 @@ def analiz_et(name, cmdline, parent_name, baglantilar):
     """Tek bir kabuk sureci icin tespit nedenlerini dondurur (saf fonksiyon, test edilebilir)."""
     nedenler = []
     if parent_name in TEHLIKELI_EBEVEYNLER:
-        nedenler.append(f"Zararli Parent-Child Baglantisi ({parent_name} -> {name})")
+        nedenler.append(f"{OFFICE_ZINCIRI} ({parent_name} -> {name})")
 
     cmd_str = " ".join(cmdline).lower() if cmdline else ""
     for param in ZARARLI_PARAMETRELER:
@@ -99,8 +100,13 @@ def maskeleme_kontrol(calisan_ad, orijinal_ad):
 
 
 def korunan_dizini_hedefliyor(cmdline, korunan=PROTECTED_DIR):
+    """Argumanlardan biri korunan dizini iceriyorsa True.
+
+    cmdline[0] (programin kendi yolu) sayilmaz: programin proje klasorunde
+    bulunmasi, o klasoru hedef aldigi anlamina gelmez.
+    """
     hedef = os.path.normcase(korunan)
-    return any(hedef in os.path.normcase(arg) for arg in cmdline or [])
+    return any(hedef in os.path.normcase(arg) for arg in (cmdline or [])[1:])
 
 
 def cyber_layer_worker(queue):

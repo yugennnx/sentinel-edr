@@ -115,3 +115,9 @@ def test_demo_imzalari():
     assert imza_bul(["cmd", "/c", "simulator\\lokal_saldiri.bat"])
     assert imza_bul(["cmd", "/c", "veri_paketleme.bat"])
     assert imza_bul(["cmd", "/c", "dir"]) is None
+
+
+def test_programin_kendi_yolu_hedefleme_sayilmaz():
+    exe = os.path.join(PROTECTED_DIR, "simulator", "winword.exe")
+    assert not process.korunan_dizini_hedefliyor([exe, "/c", "powershell -c Start-Sleep 1"])
+    assert process.korunan_dizini_hedefliyor([exe, "/c", "type " + os.path.join(PROTECTED_DIR, "x.txt")])

@@ -87,6 +87,20 @@ def _yerel_ipler():
     return ips
 
 
+def _dinlenecek_arayuzler():
+    """Varsayilan ag arayuzu + Npcap loopback.
+
+    Disaridan gelen taramalar varsayilan arayuzden, makinenin kendi IP'sine
+    yonelik trafik ise Npcap loopback arayuzunden gecer.
+    """
+    from scapy.all import conf
+    arayuzler = [conf.iface]
+    for iface in conf.ifaces.values():
+        if "loopback" in str(getattr(iface, "network_name", "")).lower() and iface not in arayuzler:
+            arayuzler.append(iface)
+    return arayuzler
+
+
 def scan_detector_worker(queue):
     """Npcap + scapy ile gelen SYN paketlerini dinler. Npcap yoksa sessizce devre disi kalir."""
     try:
@@ -111,7 +125,7 @@ def scan_detector_worker(queue):
     log.info("SYN tarama dedektoru aktif (esik: %d port / %d sn).", SCAN_PORT_THRESHOLD, SCAN_WINDOW_SECONDS)
     try:
         # Sadece SYN bayragi set, ACK set olmayan paketler (baglanti baslatma denemeleri)
-        sniff(filter="tcp[tcpflags] & tcp-syn != 0 and tcp[tcpflags] & tcp-ack == 0",
-              prn=isle, store=False)
+        sniff(iface=_dinlenecek_arayuzler(), prn=isle, store=False,
+              filter="tcp[tcpflags] & tcp-syn != 0 and tcp[tcpflags] & tcp-ack == 0")
     except Exception as e:
         log.error("SYN tarama dedektoru calisamadi (Npcap kurulu ve yonetici yetkisi var mi?): %s", e)
