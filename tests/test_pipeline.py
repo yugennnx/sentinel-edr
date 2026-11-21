@@ -13,7 +13,7 @@ def test_pipeline_kayipsiz_ve_temiz_kapanir(tmp_path):
     sq, dq, aq = mp.Queue(), mp.Queue(), mp.Queue()
     router = _proc(message_router, sq, dq, aq, name="router")
     dbp = _proc(db_writer_worker, dq, db, name="db")
-    ai = _proc(ai_fusion_worker, aq, name="ai")
+    ai = _proc(ai_fusion_worker, aq, dq, name="ai")
     for p in (router, dbp, ai):
         p.start()
     time.sleep(1)
@@ -30,5 +30,9 @@ def test_pipeline_kayipsiz_ve_temiz_kapanir(tmp_path):
     assert [p.exitcode for p in (router, dbp, ai)] == [0, 0, 0]
 
     conn = sqlite3.connect(db)
-    assert conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0] == 51
+    assert conn.execute("SELECT COUNT(*) FROM logs WHERE layer != 'RESPONSE'").fetchone()[0] == 51
+    # Tarama karari ve (loopback oldugu icin uygulanmayan) IP engelleme de kaydedilmis olmali
+    mudahaleler = [r[0] for r in conn.execute("SELECT message FROM logs WHERE layer = 'RESPONSE'")]
     conn.close()
+    assert any("KARAR" in m for m in mudahaleler)
+    assert any("127.0.0.1: uygulanmadi" in m for m in mudahaleler)

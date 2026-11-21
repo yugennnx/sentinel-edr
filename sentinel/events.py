@@ -9,6 +9,7 @@ karar motoru sureci bu bilgiyle guvenli sekilde hedefler.
 PHYSICAL = "PHYSICAL"
 CYBER = "CYBER"
 NETWORK = "NETWORK"
+RESPONSE = "RESPONSE"   # Karar motorunun verdigi kararlar ve uyguladigi mudahaleler
 
 # Olay tipleri
 KEYBOARD_ANOMALY = "KEYBOARD_ANOMALY"      # BadUSB: insanustu tuslama
@@ -19,6 +20,7 @@ LOCAL_FILE_ACCESS = "LOCAL_FILE_ACCESS"    # Korunan dizini hedef alan surec
 DATA_EXFILTRATION = "DATA_EXFILTRATION"    # Veri paketleme / yuksek giden trafik
 NETWORK_SCAN = "NETWORK_SCAN"              # Honeypot temasi veya SYN tarama
 ERROR = "ERROR"
+RESPONSE_ACTION = "RESPONSE_ACTION"
 
 # Panelde kirmizi gosterilecek yuksek riskli olaylar
 CRITICAL_EVENTS = [USB_INSERTED, DATA_EXFILTRATION, KEYBOARD_ANOMALY, LOCAL_FILE_ACCESS, NETWORK_SCAN]

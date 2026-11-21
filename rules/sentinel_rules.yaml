@@ -1,0 +1,100 @@
+# =============================================================================
+# SENTINEL TESPIT KURALLARI
+# =============================================================================
+# Kod degistirmeden kural eklemek / ayarlamak icin bu dosyayi duzenleyin.
+# Farkli bir kural dosyasi kullanmak icin: SENTINEL_RULES=<yol>
+# Dosya yuklenirken dogrulanir; hatali bir kural Sentinel'i baslatmaz ve
+# hatanin yerini soyler.
+
+version: 1
+
+# -----------------------------------------------------------------------------
+# Surec kurallari (EDR)
+# -----------------------------------------------------------------------------
+# Bir kural, belirtilen TUM kosullar saglandiginda eslesir:
+#   process_names        : surecin adi bu listede olmali (zorunlu)
+#   parent_names         : ebeveyn surecin adi bu listede olmali
+#   cmdline_contains_any : komut satirinda bu ifadelerden biri gecmeli
+#   cmdline_tokens_any   : komut satirinda bu ifadelerden biri TAM KELIME olarak gecmeli
+#                          (kisa ifadeler icin: "iex" -> "iexplore" yanlis alarm vermesin)
+#   remote_port_not_in   : surecin bu portlar disinda kurulu bir dis baglantisi olmali
+# Tum karsilastirmalar buyuk/kucuk harf duyarsizdir.
+process_rules:
+  - id: SNT-001
+    name: Office uygulamasindan kabuk acilmasi
+    mitre: T1566.001
+    process_names: &kabuklar [cmd.exe, powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe]
+    parent_names: [winword.exe, excel.exe, powerpnt.exe, outlook.exe, acrobat.exe]
+
+  - id: SNT-002
+    name: Supheli komut satiri parametresi
+    mitre: T1059.001
+    process_names: *kabuklar
+    cmdline_contains_any: [bypass, hidden, downloadstring, invoke-webrequest, bitsadmin,
+                           certutil, frombase64string, -encodedcommand]
+    cmdline_tokens_any: [-enc, -nop, iex]
+
+  - id: SNT-003
+    name: Kabuktan standart disi porta dis baglanti
+    mitre: T1071
+    process_names: *kabuklar
+    remote_port_not_in: [80, 443]
+
+# -----------------------------------------------------------------------------
+# Maskeleme (T1036.003): sistem araci baska bir adla kopyalanip calistirilmis mi?
+# Dosyanin icindeki OriginalFilename ile calisan ad karsilastirilir.
+# -----------------------------------------------------------------------------
+masquerade:
+  id: SNT-010
+  name: Maskelenmis sistem araci
+  mitre: T1036.003
+  watched_binaries: [cmd.exe, powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe,
+                     rundll32.exe, regsvr32.exe, certutil.exe, bitsadmin.exe]
+
+# -----------------------------------------------------------------------------
+# Veri paketleme (T1560): korunan dizini arsivleyen surecler
+# -----------------------------------------------------------------------------
+data_staging:
+  id: SNT-020
+  name: Korunan dizinin arsivlenmesi
+  mitre: T1560.001
+  archivers: [7z.exe, 7za.exe, 7zg.exe, rar.exe, winrar.exe, tar.exe, makecab.exe, zip.exe]
+  powershell_names: [powershell.exe, pwsh.exe]
+  powershell_keywords: [compress-archive, system.io.compression]
+
+# -----------------------------------------------------------------------------
+# Sunum modu: simulator/ klasorundeki demo .bat senaryolarinin imzalari
+# -----------------------------------------------------------------------------
+demo_signatures:
+  lokal_saldiri: "Lokal Ihlal (Casus Yazilim): Sizma Tespit Edildi {tag} -> Sentinel Hedeflendi"
+  veri_paketleme: "Lokal Ihlal (Veri Paketleme/Dripping): Arsivleme Tespit Edildi {tag} -> Sentinel Kopyalaniyor"
+
+# -----------------------------------------------------------------------------
+# Risk skoru ve karar motoru
+# -----------------------------------------------------------------------------
+risk:
+  # Olay tipi -> taban agirlik
+  weights:
+    KEYBOARD_ANOMALY: 40
+    USB_INSERTED: 20
+    SUSPICIOUS_PROCESS: 60
+    DATA_EXFILTRATION: 70
+    NETWORK_SCAN: 75
+    LOCAL_FILE_ACCESS: 85
+  # Birlikte gorulurse carpana eklenecek deger
+  correlations:
+    - events: [USB_INSERTED, DATA_EXFILTRATION]
+      bonus: 0.4
+    - events: [SUSPICIOUS_PROCESS, DATA_EXFILTRATION]
+      bonus: 0.5
+    - events: [LOCAL_FILE_ACCESS, DATA_EXFILTRATION]
+      bonus: 0.6
+    - events: [LOCAL_FILE_ACCESS, NETWORK_SCAN]
+      bonus: 0.6
+  multi_event_bonus: 0.3        # 3 veya daha fazla farkli olay tipi
+  sigmoid_slope: 0.05
+  sigmoid_center: 50
+
+# Bu kurallardan biri tetiklenirse (USB / lokal ihlal yoksa) ilgili surecler
+# oturum kilitlenmeden sessizce oldurulur ("golge mudahale").
+silent_kill_rules: [SNT-001]

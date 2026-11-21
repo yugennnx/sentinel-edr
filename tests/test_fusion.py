@@ -76,7 +76,7 @@ def test_gecersiz_olay_reddedilir():
 def test_office_makro_zinciri_golge_mudahale():
     m = FusionEngine()
     m.ingest(olay(ev.SUSPICIOUS_PROCESS,
-                  "EDR: powershell.exe (PID: 5, CTIME: 1.0) | Neden: Zararli Parent-Child Baglantisi (winword.exe -> powershell.exe)"), 0)
+                  "EDR: powershell.exe (PID: 5, CTIME: 1.0) | Neden: [SNT-001] Office uygulamasindan kabuk acilmasi (winword.exe -> powershell.exe)"), 0)
     a = m.evaluate(0)
     assert turler(a) == ["kill"]
 

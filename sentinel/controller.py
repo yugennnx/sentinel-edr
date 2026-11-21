@@ -7,6 +7,7 @@ import time
 from sentinel.config import get_logger
 from sentinel.database import db_writer_worker
 from sentinel.engine.fusion import ai_fusion_worker
+from sentinel.rules import RuleError, load_rules
 from sentinel.sensors.exfil import exfil_worker
 from sentinel.sensors.local import local_behavior_worker
 from sentinel.sensors.network import network_layer_worker, scan_detector_worker
@@ -35,7 +36,8 @@ def message_router(main_q, db_q, ai_q):
         except (EOFError, OSError):
             break
         if item == "STOP":
-            db_q.put("STOP")
+            # STOP once karar motoruna gider; motor son mudahale kayitlarini yazdiktan
+            # sonra STOP'u veritabanina iletir. Boylece hicbir kayit kaybolmaz.
             ai_q.put("STOP")
             break
         db_q.put(item)
@@ -48,6 +50,14 @@ def _proc(target, *args, name):
 
 def main():
     log.info("SENTINEL baslatiliyor...")
+
+    # Kural dosyasi hataliysa hicbir sensor baslatilmadan durulur
+    try:
+        kurallar = load_rules()
+    except RuleError as e:
+        log.error("Kural dosyasi gecersiz, SENTINEL baslatilmadi: %s", e)
+        sys.exit(2)
+    log.info("%d surec kurali yuklendi.", len(kurallar.process_rules))
 
     sensor_queue = multiprocessing.Queue()
     db_queue = multiprocessing.Queue()
@@ -62,7 +72,7 @@ def main():
         _proc(local_behavior_worker, sensor_queue, name="sensor-local"),
     ]
     db_process = _proc(db_writer_worker, db_queue, name="db-writer")
-    ai_process = _proc(ai_fusion_worker, ai_queue, name="ai-engine")
+    ai_process = _proc(ai_fusion_worker, ai_queue, db_queue, name="ai-engine")
     router_process = _proc(message_router, sensor_queue, db_queue, ai_queue, name="router")
 
     # Tuketiciler once, ureticiler sonra baslar

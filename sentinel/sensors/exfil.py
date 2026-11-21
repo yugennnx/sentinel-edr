@@ -10,24 +10,22 @@ import psutil
 from sentinel import events as ev
 from sentinel.config import (EXFIL_ALERT_COOLDOWN, EXFIL_SAMPLE_SECONDS, EXFIL_SUSTAINED_SAMPLES,
                              EXFIL_UPLOAD_BYTES_PER_SEC, get_logger)
+from sentinel.rules import get_rules
 from sentinel.sensors.process import korunan_dizini_hedefliyor
 
 log = get_logger("sensors.exfil")
 
-ARSIVLEYICILER = {"7z.exe", "7za.exe", "7zg.exe", "rar.exe", "winrar.exe", "tar.exe", "makecab.exe",
-                  "zip.exe"}
-POWERSHELL_ARSIV = ("compress-archive", "system.io.compression")
 
-
-def paketleme_mi(name, cmdline):
-    """Surec korunan dizini arsivliyorsa True."""
+def paketleme_mi(name, cmdline, rules=None):
+    """Surec korunan dizini arsivliyorsa True (kurallar: data_staging)."""
+    kural = (rules or get_rules()).data_staging
     name = (name or "").lower()
     if not korunan_dizini_hedefliyor(cmdline):
         return False
-    if name in ARSIVLEYICILER:
+    if name in kural["archivers"]:
         return True
     cmd = " ".join(cmdline or []).lower()
-    return name in ("powershell.exe", "pwsh.exe") and any(k in cmd for k in POWERSHELL_ARSIV)
+    return name in kural["powershell_names"] and any(k in cmd for k in kural["powershell_keywords"])
 
 
 class UploadSpikeDetector:
@@ -60,6 +58,8 @@ class UploadSpikeDetector:
 
 
 def exfil_worker(queue):
+    rules = get_rules()
+    stg = rules.data_staging
     log.info("Veri sizdirma sensoru aktif.")
     spike = UploadSpikeDetector()
     raporlananlar = set()
@@ -84,10 +84,10 @@ def exfil_worker(queue):
                     canli.add(anahtar)
                     if anahtar in raporlananlar:
                         continue
-                    if paketleme_mi(proc.info.get('name'), proc.info.get('cmdline')):
+                    if paketleme_mi(proc.info.get('name'), proc.info.get('cmdline'), rules):
                         queue.put((ev.CYBER, ev.DATA_EXFILTRATION, 0.9,
-                                   f"Veri Paketleme (T1560): {proc.info['name']} korunan dizini arsivliyor "
-                                   f"{ev.process_tag(*anahtar)}"))
+                                   f"EDR: {proc.info['name']} {ev.process_tag(*anahtar)} | Neden: "
+                                   f"[{stg.get('id', 'STG')}] {stg.get('name', 'Veri paketleme')}"))
                         raporlananlar.add(anahtar)
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue

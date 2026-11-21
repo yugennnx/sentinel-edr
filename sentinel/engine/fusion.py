@@ -8,8 +8,9 @@ birim testleriyle dogrulanabilir.
 Protokoller (oncelik sirasiyla):
   1. Ag savunmasi   : NETWORK_SCAN -> saldirgan IP guvenlik duvarinda engellenir
   2. Donanim        : KEYBOARD_ANOMALY (BadUSB) -> oturum hemen kilitlenir
-  3. Golge mudahale : SUSPICIOUS_PROCESS + DATA_EXFILTRATION, ya da Office
-                      uygulamasindan kabuk acilmasi (USB/lokal ihlal yok)
+  3. Golge mudahale : SUSPICIOUS_PROCESS + DATA_EXFILTRATION, ya da kural
+                      dosyasindaki 'silent_kill_rules' listesindeki bir kural
+                      (or. Office'ten kabuk acilmasi) tetiklendiyse (USB/lokal ihlal yok)
                       -> sadece supheli surecler sessizce oldurulur
   4. Kill-chain     : risk >= esik -> surecler oldurulur + oturum kilitlenir
 """
@@ -19,11 +20,14 @@ import re
 import time
 from dataclasses import dataclass
 
+import psutil
+
+from sentinel import config
 from sentinel import events as ev
 from sentinel.config import EVENT_WINDOW_SECONDS, KILL_CHAIN_THRESHOLD, LOCK_COOLDOWN_SECONDS, get_logger
 from sentinel.engine import response
 from sentinel.engine.risk import risk_skoru
-from sentinel.sensors.process import OFFICE_ZINCIRI
+from sentinel.rules import get_rules
 
 log = get_logger("engine.fusion")
 
@@ -50,7 +54,9 @@ def _pid_aksiyonlari(olaylar, tipler):
 
 
 class FusionEngine:
-    def __init__(self, window=EVENT_WINDOW_SECONDS, threshold=KILL_CHAIN_THRESHOLD, cooldown=LOCK_COOLDOWN_SECONDS):
+    def __init__(self, window=EVENT_WINDOW_SECONDS, threshold=KILL_CHAIN_THRESHOLD, cooldown=LOCK_COOLDOWN_SECONDS,
+                 rules=None):
+        self.rules = rules or get_rules()
         self.window = window
         self.threshold = threshold
         self.cooldown = cooldown
@@ -78,7 +84,7 @@ class FusionEngine:
             return []
 
         # Korelasyon icin ag olaylari da skora dahil edilir
-        risk = self.son_risk = risk_skoru(tipler)
+        risk = self.son_risk = risk_skoru(tipler, self.rules)
         aksiyonlar = []
 
         # PROTOKOL 1: Ag savunmasi
@@ -105,10 +111,11 @@ class FusionEngine:
             return aksiyonlar
 
         # PROTOKOL 3: Golge mudahale (sessiz savunma)
-        office_zinciri = any(o["tip"] == ev.SUSPICIOUS_PROCESS and OFFICE_ZINCIRI in o["mesaj"] for o in self.gecmis)
+        sessiz_kural = next((k for k in sorted(self.rules.silent_kill_rules) for o in self.gecmis
+                             if o["tip"] == ev.SUSPICIOUS_PROCESS and f"[{k}]" in o["mesaj"]), None)
         if (ev.USB_INSERTED not in tipler and ev.LOCAL_FILE_ACCESS not in tipler
-                and ev.SUSPICIOUS_PROCESS in tipler and (ev.DATA_EXFILTRATION in tipler or office_zinciri)):
-            neden = "Office makro zinciri" if office_zinciri else "Truva ati suphesi"
+                and ev.SUSPICIOUS_PROCESS in tipler and (ev.DATA_EXFILTRATION in tipler or sessiz_kural)):
+            neden = f"kural {sessiz_kural}" if sessiz_kural else "Truva ati suphesi"
             aksiyonlar.append(Action("alert", ("WARNING", f"GOLGE MUDAHALE ({neden}) - risk {risk}")))
             aksiyonlar += _pid_aksiyonlari(self.gecmis, {ev.SUSPICIOUS_PROCESS, ev.DATA_EXFILTRATION})
             self._sifirla(now, kilit=False)
@@ -129,19 +136,37 @@ class FusionEngine:
             self.kilit_bitis = now + self.cooldown
 
 
+def _surec_adi(pid):
+    try:
+        return psutil.Process(pid).name()
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return "?"
+
+
 def uygula(aksiyon):
+    """Aksiyonu uygular ve panelde gosterilecek bir ozet dondurur."""
+    on_ek = "[DRY-RUN] " if config.DRY_RUN else ""
     if aksiyon.kind == "alert":
         seviye, mesaj = aksiyon.target
         log.log(getattr(logging, seviye), mesaj)
-    elif aksiyon.kind == "block_ip":
-        response.dinamik_ip_engelle(*aksiyon.target)
-    elif aksiyon.kind == "kill":
-        response.guvenli_surec_oldur(*aksiyon.target)
-    elif aksiyon.kind == "lock":
+        return f"KARAR: {mesaj}"
+    if aksiyon.kind == "block_ip":
+        ip = aksiyon.target[0]
+        basarili = response.dinamik_ip_engelle(ip)
+        return f"{on_ek}IP engelleme {ip}: {'basarili' if basarili else 'uygulanmadi'}"
+    if aksiyon.kind == "kill":
+        pid, ctime = aksiyon.target
+        ad = _surec_adi(pid)
+        basarili = response.guvenli_surec_oldur(pid, ctime)
+        return f"{on_ek}Surec imhasi {ad} (PID {pid}): {'basarili' if basarili else 'uygulanmadi'}"
+    if aksiyon.kind == "lock":
         response.oturumu_kilitle()
+        return f"{on_ek}Oturum kilitlendi"
+    return None
 
 
-def ai_fusion_worker(queue):
+def ai_fusion_worker(queue, db_queue=None):
+    """db_queue verilirse kararlar ve mudahaleler de veritabanina (katman RESPONSE) yazilir."""
     log.info("Karar motoru baslatildi. Otonom savunma aktif.")
     motor = FusionEngine()
 
@@ -157,6 +182,8 @@ def ai_fusion_worker(queue):
         su_an = time.time()
         for item in yeni:
             if item == "STOP":
+                if db_queue is not None:
+                    db_queue.put("STOP")
                 log.info("Karar motoru durduruldu.")
                 return
             if not motor.ingest(item, su_an):
@@ -164,7 +191,9 @@ def ai_fusion_worker(queue):
 
         try:
             for aksiyon in motor.evaluate(su_an):
-                uygula(aksiyon)
+                ozet = uygula(aksiyon)
+                if ozet and db_queue is not None:
+                    db_queue.put((ev.RESPONSE, ev.RESPONSE_ACTION, round(motor.son_risk / 100, 2), ozet))
         except Exception:
             # Tek bir hatali olay tum savunma motorunu oldurmemeli
             log.exception("Karar motoru hatasi")

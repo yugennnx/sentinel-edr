@@ -1,11 +1,8 @@
 """Siber katman (EDR): surec davranis analizi.
 
-Kurallar (MITRE ATT&CK):
-- T1566/T1204  Office/PDF uygulamasindan kabuk acilmasi (parent-child)
-- T1059/T1027  Kabukta supheli parametre (-enc, bypass, hidden, iex ...)
-- T1071        Kabugun 80/443 disi bir porta disari baglanmasi (ters kabuk)
-- T1036.003    Maskeleme: cmd.exe / powershell.exe gibi bir sistem aracinin
-               baska bir adla kopyalanip calistirilmasi
+Kurallar rules/sentinel_rules.yaml dosyasindan okunur:
+- process_rules : parent-child, komut satiri ve ag baglantisi kurallari
+- masquerade    : sistem aracinin baska bir adla kopyalanip calistirilmasi (T1036.003)
 """
 import os
 import time
@@ -14,19 +11,9 @@ import psutil
 
 from sentinel import events as ev
 from sentinel.config import BASE_DIR, PROTECTED_DIR, get_logger
+from sentinel.rules import get_rules
 
 log = get_logger("sensors.process")
-
-TEHLIKELI_EBEVEYNLER = {'winword.exe', 'excel.exe', 'powerpnt.exe', 'acrobat.exe', 'outlook.exe'}
-HEDEF_KABUKLAR = {'cmd.exe', 'powershell.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe', 'mshta.exe'}
-ZARARLI_PARAMETRELER = ['-enc', 'bypass', 'hidden', 'downloadstring', 'invoke-webrequest',
-                        'bitsadmin', 'certutil', 'iex', 'frombase64string']
-GUVENLI_PORTLAR = {80, 443}
-OFFICE_ZINCIRI = "Zararli Parent-Child Baglantisi"  # Karar motoru bu isareti arar
-
-# Maskelemede izlenen sistem araclari (PE dosyasindaki OriginalFilename -> gercek ad)
-LOLBINS = {"cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe", "mshta.exe",
-           "rundll32.exe", "regsvr32.exe", "certutil.exe", "bitsadmin.exe"}
 
 DASHBOARD_YOLU = os.path.normcase(os.path.join(BASE_DIR, "sentinel", "ui", "dashboard.py"))
 
@@ -43,29 +30,27 @@ def guvenli_dashboard_sureci(cmdline):
     birlesik = " ".join(tokens)
     if "streamlit" not in birlesik or "run" not in tokens:
         return False
-    if any(p in birlesik for p in ZARARLI_PARAMETRELER):
+    # Komut satiri bir tespit kuralina takiliyorsa beyaz liste gecersiz
+    if analiz_et("powershell.exe", cmdline, "", []):
         return False
     return any(os.path.normcase(os.path.abspath(t.strip('"'))) == DASHBOARD_YOLU for t in cmdline)
 
 
-def analiz_et(name, cmdline, parent_name, baglantilar):
-    """Tek bir kabuk sureci icin tespit nedenlerini dondurur (saf fonksiyon, test edilebilir)."""
-    nedenler = []
-    if parent_name in TEHLIKELI_EBEVEYNLER:
-        nedenler.append(f"{OFFICE_ZINCIRI} ({parent_name} -> {name})")
+def izlenen_surecler(rules=None):
+    """Herhangi bir surec kuralinin hedefledigi surec adlari."""
+    rules = rules or get_rules()
+    return frozenset().union(*(r.process_names for r in rules.process_rules))
 
-    cmd_str = " ".join(cmdline).lower() if cmdline else ""
-    for param in ZARARLI_PARAMETRELER:
-        # Kisa parametreler (iex) sadece tam kelime olarak aranir: "iexplore" yanlis alarm vermesin
-        if param in cmd_str.split() or (len(param) > 3 and param in cmd_str):
-            nedenler.append(f"Kritik Payload Parametresi Yakalandi ({param})")
-            break
 
-    for ip, port in baglantilar:
-        if port not in GUVENLI_PORTLAR and not ip.startswith("127.") and ip != "::1":
-            nedenler.append(f"Ters Baglanti Tespiti -> Hedef: {ip}:{port}")
-            break
-    return nedenler
+def analiz_et(name, cmdline, parent_name, baglantilar, rules=None):
+    """Bir surec icin eslesen kurallarin aciklamalarini dondurur (saf fonksiyon, test edilebilir)."""
+    rules = rules or get_rules()
+    sonuc = []
+    for kural in rules.process_rules:
+        aciklama = kural.match(name, cmdline, parent_name, baglantilar)
+        if aciklama:
+            sonuc.append(aciklama)
+    return sonuc
 
 
 # ----------------------------------------------------------------------------
@@ -89,12 +74,13 @@ def pe_orijinal_ad(exe_path):
     return ad
 
 
-def maskeleme_kontrol(calisan_ad, orijinal_ad):
+def maskeleme_kontrol(calisan_ad, orijinal_ad, rules=None):
     """Calisan ad, sistem aracinin gercek adindan farkliysa maskelenen aracin adini dondurur."""
     if not orijinal_ad:
         return None
+    izlenen = (rules or get_rules()).masquerade["watched_binaries"]
     gercek = orijinal_ad.lower().removesuffix(".mui")
-    if gercek in LOLBINS and calisan_ad.lower() != gercek:
+    if gercek in izlenen and calisan_ad.lower() != gercek:
         return gercek
     return None
 
@@ -111,7 +97,10 @@ def korunan_dizini_hedefliyor(cmdline, korunan=PROTECTED_DIR):
 
 def cyber_layer_worker(queue):
     time.sleep(3)
-    log.info("Siber katman (EDR) aktif. Davranissal analiz basladi...")
+    rules = get_rules()
+    hedef_surecler = izlenen_surecler(rules)
+    masq = rules.masquerade
+    log.info("Siber katman (EDR) aktif: %d surec kurali + maskeleme.", len(rules.process_rules))
 
     # PID'ler Windows'ta tekrar kullanilir: (pid, create_time) ciftiyle takip edilir
     raporlananlar = set()
@@ -133,20 +122,20 @@ def cyber_layer_worker(queue):
                     exe = proc.info.get('exe')
 
                     # 1) Maskelenmis sistem araci
-                    maskelenen = maskeleme_kontrol(name, pe_orijinal_ad(exe)) if exe else None
+                    maskelenen = maskeleme_kontrol(name, pe_orijinal_ad(exe), rules) if exe else None
                     if maskelenen:
                         tag = ev.process_tag(pid, ctime)
+                        kural = f"[{masq.get('id', 'MASQ')}] {masq.get('name', 'Maskeleme')} ({maskelenen} kopyasi)"
                         if korunan_dizini_hedefliyor(cmdline):
                             queue.put((ev.CYBER, ev.LOCAL_FILE_ACCESS, 0.99,
-                                       f"Maskelenmis {maskelenen} korunan dizini hedefliyor: {name} {tag}"))
+                                       f"EDR: {name} {tag} | Neden: {kural} korunan dizini hedefliyor"))
                         else:
-                            queue.put((ev.CYBER, ev.SUSPICIOUS_PROCESS, 0.95,
-                                       f"EDR: {name} {tag} | Neden: Maskeleme ({maskelenen} kopyasi, T1036)"))
+                            queue.put((ev.CYBER, ev.SUSPICIOUS_PROCESS, 0.95, f"EDR: {name} {tag} | Neden: {kural}"))
                         raporlananlar.add(anahtar)
                         continue
 
                     # 2) Kabuk davranis kurallari
-                    if name not in HEDEF_KABUKLAR or guvenli_dashboard_sureci(cmdline):
+                    if name not in hedef_surecler or guvenli_dashboard_sureci(cmdline):
                         continue
 
                     parent_name = ""
@@ -165,7 +154,7 @@ def cyber_layer_worker(queue):
                     except psutil.AccessDenied:
                         pass
 
-                    nedenler = analiz_et(name, cmdline, parent_name, baglantilar)
+                    nedenler = analiz_et(name, cmdline, parent_name, baglantilar, rules)
                     if nedenler:
                         detay = f"EDR: {name} {ev.process_tag(pid, ctime)} | Neden: {' | '.join(nedenler)}"
                         queue.put((ev.CYBER, ev.SUSPICIOUS_PROCESS, 0.99, detay))

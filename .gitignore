@@ -24,3 +24,6 @@ venv/
 
 # Test
 .pytest_cache/
+
+# Yerel gelistirme araci ayarlari
+.claude/

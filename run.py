@@ -67,7 +67,9 @@ def main():
         arayuz = subprocess.Popen([sys.executable, os.path.join(UI_DIR, "desktop.py")], cwd=BASE_DIR)
     else:
         arayuz = subprocess.Popen([sys.executable, "-m", "streamlit", "run",
-                                   os.path.join(UI_DIR, "dashboard.py")], cwd=BASE_DIR)
+                                   os.path.join(UI_DIR, "dashboard.py"),
+                                   "--server.address", "localhost"],  # Panel sadece bu bilgisayardan erisilebilir
+                                  cwd=BASE_DIR)
 
     try:
         arayuz.wait()
