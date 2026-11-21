@@ -4,6 +4,8 @@ import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
 
+from config import DB_PATH
+
 # ==========================================
 # 1. SABİT İSKELET VE CSS (ASLA YENİLENMEZ)
 # ==========================================
@@ -26,15 +28,19 @@ st.markdown("""
 
 st.markdown("<h1 style='text-align: center; color: #4AF626; text-shadow: 0 0 15px #228B22; border-bottom: 1px solid rgba(74,246,38,0.3); padding-bottom: 10px; font-family: Courier New;'>🛡️ SENTINEL SİBER-FİZİKSEL KOMUTA MERKEZİ</h1>", unsafe_allow_html=True)
 
-DB_NAME = "sentinel_logs.db"
+DB_NAME = DB_PATH
+
+# Kirmizi alarm uretecek olay tipleri (tum yuksek riskli olaylar)
+KRITIK_OLAYLAR = ["USB_INSERTED", "DATA_EXFILTRATION", "KEYBOARD_ANOMALY", "LOCAL_FILE_ACCESS", "NETWORK_SCAN"]
 
 def fetch_data():
     try:
-        conn = sqlite3.connect(DB_NAME, timeout=1)
-        df = pd.read_sql_query("SELECT timestamp, layer, event_type, confidence, message FROM logs ORDER BY id DESC LIMIT 100", conn)
-        conn.close()
-        return df
-    except:
+        conn = sqlite3.connect(f"file:{DB_NAME}?mode=ro", uri=True, timeout=1)
+        try:
+            return pd.read_sql_query("SELECT timestamp, layer, event_type, confidence, message FROM logs ORDER BY id DESC LIMIT 100", conn)
+        finally:
+            conn.close()
+    except (sqlite3.Error, pd.errors.DatabaseError):
         return pd.DataFrame()
 
 # ==========================================
@@ -51,7 +57,7 @@ def canli_komuta_merkezi():
         
         # Son olaya göre anlık risk tespiti (Füzyon Kararı)
         son_olay = df.iloc[0]['event_type']
-        kilit_tehdit = son_olay in ["USB_INSERTED", "DATA_EXFILTRATION", "KEYBOARD_ANOMALY"]
+        kilit_tehdit = son_olay in KRITIK_OLAYLAR
         
         durum_sinif = "metrik-kutu kirmizi-alarm" if kilit_tehdit else "metrik-kutu"
         durum_yazi = "AKTİF İHLAL TESPİTİ" if kilit_tehdit else "SİSTEM GÜVENDE"
@@ -87,7 +93,7 @@ def canli_komuta_merkezi():
         # --- HAM VERİ AKIŞI (SİNİR AĞI) ---
         st.markdown("<h4 style='color:#8FBC8F; border-bottom: 1px solid #1f5e1f; font-family: Consolas;'>[>] SİNİR AĞI VERİ AKIŞI</h4>", unsafe_allow_html=True)
         def satir_renklendir(row):
-            if row['event_type'] in ['DATA_EXFILTRATION', 'KEYBOARD_ANOMALY', 'USB_INSERTED']:
+            if row['event_type'] in KRITIK_OLAYLAR:
                 return ['background-color: rgba(255, 0, 60, 0.15); color: #FF003C'] * len(row)
             if row['event_type'] == 'SUSPICIOUS_PROCESS':
                 return ['background-color: rgba(255, 215, 0, 0.1); color: #FFD700'] * len(row)

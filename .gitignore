@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+
+# IDE
+.spyproject/
+.spyderproject/
+.vscode/
+.idea/
+
+# Calisma zamani verileri (loglar)
+*.db
+*.db-shm
+*.db-wal
+
+# Simulatorun urettigi sistem programi kopyalari (cmd.exe / powershell.exe)
+*.exe
+
+# Buyuk / gecici dosyalar
+*.bak

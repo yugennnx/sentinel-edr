@@ -1,79 +1,107 @@
 import multiprocessing
-import time
+import queue as queue_mod
+import signal
 import sys
+import time
+
+from config import get_logger
 from database import db_writer_worker
 from sensors import physical_layer_worker, cyber_layer_worker, network_layer_worker, local_behavior_worker
-from ai_engine import ai_fusion_worker 
+from ai_engine import ai_fusion_worker
+
+log = get_logger("controller")
+
+
+def _run_worker(target, *args):
+    """Alt surecler Ctrl+C'yi yok sayar; kapatmayi sadece ana surec yonetir.
+
+    Windows'ta Ctrl+C konsoldaki TUM sureclere gider. Bu olmadan router ve
+    veritabani sureci STOP mesajini almadan olur ve kapanis kilitlenirdi.
+    """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    target(*args)
+
 
 def message_router(main_q, db_q, ai_q):
     while True:
         try:
-            item = main_q.get()
-            if item == "STOP":
-                db_q.put("STOP")
-                ai_q.put("STOP")
-                break
-            db_q.put(item)
-            ai_q.put(item)
-        except Exception:
-            pass
+            item = main_q.get(timeout=1)
+        except queue_mod.Empty:
+            continue
+        except (EOFError, OSError):
+            break
+        if item == "STOP":
+            db_q.put("STOP")
+            ai_q.put("STOP")
+            break
+        db_q.put(item)
+        ai_q.put(item)
+
+
+def _proc(target, *args, name):
+    return multiprocessing.Process(target=_run_worker, args=(target, *args), name=name, daemon=True)
+
 
 def main():
-    print("[*] SENTINEL Baslatiliyor...")
-    
-    sensor_queue = multiprocessing.Queue() 
-    db_queue = multiprocessing.Queue()     
-    ai_queue = multiprocessing.Queue()     
+    log.info("SENTINEL baslatiliyor...")
 
-    phys_process = multiprocessing.Process(target=physical_layer_worker, args=(sensor_queue,))
-    cyber_process = multiprocessing.Process(target=cyber_layer_worker, args=(sensor_queue,))
-    net_process = multiprocessing.Process(target=network_layer_worker, args=(sensor_queue,))
-    
-    # YENİ EKLENEN LOKAL DAVRANIŞ SENSÖRÜ
-    local_process = multiprocessing.Process(target=local_behavior_worker, args=(sensor_queue,))
-    
-    db_process = multiprocessing.Process(target=db_writer_worker, args=(db_queue,))
-    ai_process = multiprocessing.Process(target=ai_fusion_worker, args=(ai_queue,)) 
-    
-    router_process = multiprocessing.Process(target=message_router, args=(sensor_queue, db_queue, ai_queue))
+    sensor_queue = multiprocessing.Queue()
+    db_queue = multiprocessing.Queue()
+    ai_queue = multiprocessing.Queue()
 
-    router_process.start()
-    db_process.start()
-    phys_process.start()
-    cyber_process.start()
-    net_process.start()
-    local_process.start() # Lokal sensörü ateşle
-    ai_process.start() 
-    
-    print("[+] Tum cekirdek moduller devrede (Fiziksel, Siber, Ag, Lokal, AI, Router). Veri isleniyor...")
-    print("[!] Cikis yapmak icin konsolda Ctrl+C'ye basin.")
+    sensors = [
+        _proc(physical_layer_worker, sensor_queue, name="sensor-physical"),
+        _proc(cyber_layer_worker, sensor_queue, name="sensor-cyber"),
+        _proc(network_layer_worker, sensor_queue, name="sensor-network"),
+        _proc(local_behavior_worker, sensor_queue, name="sensor-local"),
+    ]
+    db_process = _proc(db_writer_worker, db_queue, name="db-writer")
+    ai_process = _proc(ai_fusion_worker, ai_queue, name="ai-engine")
+    router_process = _proc(message_router, sensor_queue, db_queue, ai_queue, name="router")
+
+    # Tuketiciler once, ureticiler sonra baslar
+    for p in [router_process, db_process, ai_process, *sensors]:
+        p.start()
+
+    log.info("Tum cekirdek moduller devrede (Fiziksel, Siber, Ag, Lokal, AI, Router).")
+    log.info("Cikis yapmak icin konsolda Ctrl+C'ye basin.")
 
     try:
         while True:
             time.sleep(1)
-            
+            for p in [router_process, db_process, ai_process, *sensors]:
+                if not p.is_alive() and p.exitcode not in (0, None):
+                    log.error("Modul beklenmedik sekilde durdu: %s (cikis kodu %s)", p.name, p.exitcode)
+                    sensors = [s for s in sensors if s is not p]
+                    if p in (router_process, db_process, ai_process):
+                        raise RuntimeError(f"Kritik modul coktu: {p.name}")
     except KeyboardInterrupt:
-        print("\n[!] Kapatilma sinyali alindi. Sistem guvenli moda geciyor...")
-        
-        phys_process.terminate()
-        cyber_process.terminate()
-        net_process.terminate()
-        local_process.terminate() # Kapanışta lokal sensörü durdur
-        ai_process.terminate()
-        router_process.terminate()
-        
-        sensor_queue.put("STOP")
-        
-        phys_process.join()
-        cyber_process.join()
-        net_process.join()
-        local_process.join()
-        ai_process.join()
-        db_process.join()
-        router_process.join()
-        
-        print("[-] SENTINEL guvenle kapatildi.")
-        sys.exit(0)
+        log.info("Kapatilma sinyali alindi. Sistem guvenli moda geciyor...")
+    except RuntimeError as e:
+        log.error("%s - sistem kapatiliyor.", e)
+    finally:
+        shutdown(sensors, router_process, db_process, ai_process, sensor_queue)
+        log.info("SENTINEL guvenle kapatildi.")
+    sys.exit(0)
+
+
+def shutdown(sensors, router_process, db_process, ai_process, sensor_queue):
+    # 1) Yeni olay uretimini durdur
+    for p in sensors:
+        p.terminate()
+    for p in sensors:
+        p.join(timeout=3)
+
+    # 2) Router hala canliyken STOP gonder; router bunu DB ve AI'ya iletir,
+    #    boylece kuyrukta bekleyen loglar diske yazildiktan sonra kapanirlar.
+    sensor_queue.put("STOP")
+    for p in (router_process, db_process, ai_process):
+        p.join(timeout=5)
+        if p.is_alive():
+            log.warning("%s zamaninda kapanmadi, zorla sonlandiriliyor.", p.name)
+            p.terminate()
+            p.join(timeout=2)
+
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()

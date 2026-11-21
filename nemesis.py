@@ -4,20 +4,22 @@ import threading
 import socket
 import shutil
 import os
+import tempfile
 
 # ==========================================
 # KONFİGÜRASYON
 # ==========================================
 KALI_IP = "10.40.154.50" 
 HEDEF_IP = "127.0.0.1" 
-HEDEF_PROJE = r"C:\Users\tugra\Desktop\Sentinel"
+HEDEF_PROJE = os.path.dirname(os.path.abspath(__file__))
+TEST_CIKTISI = os.path.join(tempfile.gettempdir(), "sentinel_lotl_test.txt")
 
 # Sahnede görsel şov yapmak ve arka plan çökmelerini önlemek için araç yolları
 CASUS_EXE = os.path.join(HEDEF_PROJE, "siber_casus.exe")
 HIRSIZ_EXE = os.path.join(HEDEF_PROJE, "veri_hirsizi.exe")
 
 def araclari_hazirla():
-    cmd_path = r"C:\Windows\System32\cmd.exe"
+    cmd_path = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe")
     try:
         # CMD'nin kopyasi sahte ajan olarak yaratilir (Asla cokmez)
         if not os.path.exists(CASUS_EXE): shutil.copy2(cmd_path, CASUS_EXE)
@@ -51,24 +53,24 @@ def execute_attack(attack_type):
 
     elif attack_type == "MAKRO":
         status_label.config(text="[+] DURUM: Oltalama (Makro) Devrede...", fg="#FF00FF")
-        cmd = 'copy C:\\Windows\\System32\\cmd.exe winword.exe /Y > nul && winword.exe /c "powershell.exe -WindowStyle Hidden -Command Start-Sleep -s 10"'
-        subprocess.Popen(cmd, shell=True)
+        cmd = 'copy "%SystemRoot%\\System32\\cmd.exe" winword.exe /Y > nul && winword.exe /c "powershell.exe -WindowStyle Hidden -Command Start-Sleep -s 10"'
+        subprocess.Popen(cmd, shell=True, cwd=HEDEF_PROJE)
 
     elif attack_type == "FILELESS":
         status_label.config(text="[+] DURUM: Dosyasiz Indirme (LoTL) Calistirildi...", fg="#00BFFF")
-        cmd = 'powershell.exe -WindowStyle Hidden -Command "Invoke-WebRequest -Uri http://example.com -OutFile C:\\Users\\tugra\\Desktop\\test.txt; Start-Sleep -s 10"'
+        cmd = f'powershell.exe -WindowStyle Hidden -Command "Invoke-WebRequest -Uri http://example.com -OutFile \'{TEST_CIKTISI}\'; Start-Sleep -s 10"'
         subprocess.Popen(cmd, shell=True)
 
     elif attack_type == "LOCAL":
         status_label.config(text="[+] DURUM: Lokal Ihlal (Gorsel Casus) Devrede...", fg="#FF8C00")
         # Ekranda KIRMIZI renkli gercek bir korsan terminali firlatir. AI onu 15 saniye icinde gorecek.
-        cmd = f'"{CASUS_EXE}" /c "color 4c & title SIBER CASUS - SIZMA BASARILI & echo [!] SISTEME SIZILDI. & echo [>] Hedeflenen Dizin: {HEDEF_PROJE} & echo [*] Kritik Sifreler Cekiliyor... Lutfen Bekleyin. & ping 127.0.0.1 -n 15 > nul"'
+        cmd = f'"{CASUS_EXE}" /c "color 4c & title SIBER CASUS - SIZMA BASARILI & echo [!] SISTEME SIZILDI. & echo [^>] Hedeflenen Dizin: {HEDEF_PROJE} & echo [*] Kritik Sifreler Cekiliyor... Lutfen Bekleyin. & ping 127.0.0.1 -n 15 > nul"'
         subprocess.Popen(cmd, creationflags=CREATE_NEW_CONSOLE)
 
     elif attack_type == "DRIPPING":
         status_label.config(text="[+] DURUM: Veri Paketleme (Gorsel Hirsiz) Devrede...", fg="#FFD700")
         # Ekranda SARI renkli gercek bir korsan terminali firlatir.
-        cmd = f'"{HIRSIZ_EXE}" /c "color 60 & title VERI HIRSIZI - PAKETLEME & echo [!] VERI SIZINTISI BASLADI. & echo [>] Kaynak Merkez: {HEDEF_PROJE} & echo [*] Tum projeler arsivleniyor (Dripping)... & ping 127.0.0.1 -n 15 > nul"'
+        cmd = f'"{HIRSIZ_EXE}" /c "color 60 & title VERI HIRSIZI - PAKETLEME & echo [!] VERI SIZINTISI BASLADI. & echo [^>] Kaynak Merkez: {HEDEF_PROJE} & echo [*] Tum projeler arsivleniyor (Dripping)... & ping 127.0.0.1 -n 15 > nul"'
         subprocess.Popen(cmd, creationflags=CREATE_NEW_CONSOLE)
 
     root.after(4000, lambda: status_label.config(text="[*] DURUM: Hedef Bekleniyor...", fg="#FF003C"))

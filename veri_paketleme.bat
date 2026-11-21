@@ -18,11 +18,11 @@ for /l %%x in (1, 1, 100) do (
 echo.
 echo [*] Proje dosyalari basariyla okundu ve paketlendi.
 echo.
-echo [>] SUNUCUYA AKTARIM BASLADI (Gecikmeli Gonderim)...
+echo [^>] SUNUCUYA AKTARIM BASLADI (Gecikmeli Gonderim)...
 echo [#########                   ] %%30
 
 :: Sentinel'in müdahale edeceği an.
 ping 127.0.0.1 -n 10 > nul
 
 echo [+] TUM VERILER SIZDIRILDI.
-pause
+pause

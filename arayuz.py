@@ -2,7 +2,7 @@ import tkinter as tk
 import sqlite3
 import datetime
 
-DB_NAME = "sentinel_logs.db"
+from config import DB_PATH as DB_NAME
 
 def fetch_data():
     try:

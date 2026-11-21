@@ -11,7 +11,7 @@ ping 127.0.0.1 -n 2 > nul
 echo [*] Sifreleme Anahtarlari Icin Bellek Taramasi Baslatildi...
 ping 127.0.0.1 -n 2 > nul
 echo.
-echo [>] KABA KUVVET (BRUTE-FORCE) SALDIRISI:
+echo [^>] KABA KUVVET (BRUTE-FORCE) SALDIRISI:
 echo.
 
 :: Ekranda hizlica akan sahte bellek ve sifre denemeleri
@@ -22,11 +22,11 @@ echo [0x0061] Deneniyor HASH: 88B2A%random%%random%... [BASARILI!]
 echo.
 echo [*] Anahtar Bulundu. Proje Dosyalarina Erisiliyor...
 echo.
-echo [>] VERILER KOPYALANIYOR... LUTFEN BEKLEYIN.
+echo [^>] VERILER KOPYALANIYOR... LUTFEN BEKLEYIN.
 echo [====================          ] %%65
 
 :: Sentinel'in müdahale edeceği an.
 ping 127.0.0.1 -n 10 > nul
 
 echo [+] VERILER CALINDI.
-pause
+pause
